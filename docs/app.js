@@ -8,6 +8,10 @@
  */
 'use strict';
 
+// Bump with every release, together with CACHE in sw.js. Shown on the
+// Settings screen so it is possible to tell which build a phone is running.
+var APP_VERSION = 'v4';
+
 var CFG_KEY = 'rfa-cfg';
 var QUEUE_KEY = 'rfa-queue';
 var CACHE_KEY = 'rfa-cache';
@@ -284,6 +288,7 @@ function setupView() {
     '</div>' +
     (QUEUE.length ? '<p style="margin-top:16px"><b>' + QUEUE.length + '</b> edit' +
       (QUEUE.length === 1 ? '' : 's') + ' made on this phone are still waiting to sync.</p>' : '') +
+    '<p style="margin-top:20px;font-size:12px;color:#6B7280">Build ' + esc(APP_VERSION) + '</p>' +
     '</div>';
 }
 
@@ -988,8 +993,21 @@ function renderGroceries() {
   }, 30000);
 
   if ('serviceWorker' in navigator) {
+    // True only when a previous build is already serving this page. A first
+    // install also fires controllerchange, and reloading for that is pointless.
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (hadController && !reloading) { reloading = true; location.reload(); }
+    });
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('./sw.js').catch(function () {});
+      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        // iOS keeps home screen apps alive for a long time, so a launch is
+        // often just an unhide. Check for a new build whenever we come back.
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') reg.update().catch(function () {});
+        });
+      }).catch(function () {});
     });
   }
 })();

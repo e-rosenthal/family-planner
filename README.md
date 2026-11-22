@@ -97,8 +97,15 @@ To the app:
 git push                 # GitHub Pages republishes within a minute or so
 ```
 
-Bump `CACHE` in `docs/sw.js` when the shell changes, otherwise phones keep
-serving the old copy from the service worker cache.
+Bump **both** `APP_VERSION` in `docs/app.js` and `CACHE` in `docs/sw.js` when
+the shell changes. `CACHE` is what makes phones fetch the new copy instead of
+serving the old one from the service worker cache; `APP_VERSION` is shown on
+the Settings screen so you can tell which build a phone is actually running.
+
+A phone picks up a new build on its next launch: the new service worker
+installs, takes over, and the page reloads itself once. Pull down to refresh
+is not available in a standalone PWA, so if a phone seems stuck, force-quit it
+from the app switcher rather than just returning to the home screen.
 
 To the server:
 
