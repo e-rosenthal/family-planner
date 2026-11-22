@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Family Planner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1F3A5F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Family">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="icon" href="./icons/icon-192.png">
+<style>
+:root{--navy:#1F3A5F;--bg:#F3F4F6;--card:#fff;--line:#E5E7EB;--muted:#6B7280;--amber:#FCD9A0;--amberText:#633806;--blue:#CBE1F7;--blueText:#0C447C;--today:#FFF2CC;--chip:#EEEDFE;--chipText:#3C3489}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:#111827;font-size:15px}
+header{position:sticky;top:0;z-index:5;background:var(--navy);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+.top{display:flex;justify-content:space-between;align-items:baseline}
+header h1{margin:0;font-size:19px;font-weight:600}
+header .sub{font-size:13px;opacity:.85;margin-top:2px}
+.refresh{background:none;border:0;color:#fff;opacity:.85;font-size:13px;font-family:inherit}
+.tabs{display:flex;gap:6px;margin-top:10px}
+.tab{flex:1;border:0;border-radius:8px;padding:8px 4px;font-size:13px;background:rgba(255,255,255,.15);color:#fff;font-family:inherit}
+.tab.on{background:#fff;color:var(--navy);font-weight:600}
+main{padding:12px;max-width:640px;margin:0 auto;padding-bottom:calc(40px + env(safe-area-inset-bottom))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.card.today{border:2px solid #D99919}
+.card.past{opacity:.55}
+.dh{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line)}
+.card.today .dh{background:var(--today)}
+.dh b{font-size:16px}
+.badge{font-size:11px;background:#D99919;color:#fff;border-radius:999px;padding:2px 8px}
+.plans{padding:8px 12px 0;display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--chip);color:var(--chipText);border-radius:999px;padding:3px 10px;font-size:13px}
+.prep{margin:8px 12px 0;padding:6px 10px;border-radius:8px;background:#FAEEDA;color:var(--amberText);font-size:13px}
+.rows{padding:6px 12px 10px}
+.row{display:flex;align-items:center;gap:10px;padding:5px 0}
+.row label{width:96px;flex:none;font-size:13px;color:var(--muted)}
+.row select,.row input,.f input,.f select{flex:1;min-width:0;width:100%;font-size:15px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#111827;-webkit-appearance:none;appearance:none;font-family:inherit}
+.usual{color:#9CA3AF !important;font-style:italic}
+.need{background:var(--amber) !important;color:var(--amberText) !important;border-color:#EF9F27 !important}
+.pool{background:var(--blue) !important;color:var(--blueText) !important;font-weight:600}
+.add{padding:0 12px 12px}
+.add input{width:100%;font-size:14px;padding:7px 9px;border:1px dashed #C7CBD1;border-radius:8px;font-family:inherit}
+.note{font-size:12px;color:var(--muted);padding:0 12px 10px}
+h2{font-size:15px;margin:18px 4px 8px;color:var(--navy);display:flex;justify-content:space-between;align-items:center}
+.list{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.li{display:flex;gap:10px;padding:10px 12px;border-top:1px solid var(--line);font-size:14px;align-items:flex-start}
+.li:first-child{border-top:0}
+.li .d{width:96px;flex:none;color:var(--muted);font-size:13px}
+.li .t{flex:1}
+.li .s{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.li.soon{background:var(--today)}
+.li.poolrow{background:#EAF3FB}
+.li.tap{cursor:pointer}
+.empty{padding:10px 12px;color:var(--muted);font-size:14px}
+.btn{border:0;border-radius:8px;padding:8px 12px;font-size:14px;background:var(--navy);color:#fff;font-family:inherit}
+.btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--line)}
+.btn.danger{background:#fff;color:#A32D2D;border:1px solid #F09595}
+.btn.small{padding:5px 10px;font-size:13px}
+.editor{padding:12px;border-top:1px solid var(--line);background:#FAFAFB}
+.f{margin-bottom:8px}
+.f span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+.two{display:flex;gap:8px}
+.two .f{flex:1}
+.actions{display:flex;gap:8px;margin-top:4px}
+.actions .grow{flex:1}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#111827;color:#fff;padding:8px 14px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:88vw;text-align:center}
+#toast.show{opacity:.92}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+main.wide{max-width:1180px}
+.seg{display:flex;gap:4px;background:#E5E7EB;border-radius:8px;padding:3px;margin:0 0 10px;width:max-content}
+.seg button{border:0;background:none;padding:5px 14px;border-radius:6px;font-size:13px;color:var(--muted);font-family:inherit}
+.seg button.on{background:#fff;color:var(--navy);font-weight:600}
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;background:#fff;border:1px solid var(--line);border-radius:12px}
+table.grid{border-collapse:separate;border-spacing:0;width:100%}
+.grid th,.grid td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:4px;vertical-align:top;min-width:124px}
+.grid thead th{background:var(--navy);color:#fff;font-size:13px;font-weight:600;padding:8px 6px;text-align:left;white-space:nowrap}
+.grid thead th.today{background:#D99919}
+.grid .rl{position:sticky;left:0;z-index:2;background:#F1F3F5;min-width:78px;width:78px;font-size:12px;font-weight:600;color:#374151;padding:8px 6px}
+.grid thead th.rl{background:var(--navy);color:#fff;z-index:3}
+.grid td.today{background:#FFFBEB}
+.grid td.past,.grid th.past{opacity:.5}
+.grid select,.grid input{width:100%;font-size:13px;padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:#111827;-webkit-appearance:none;appearance:none;font-family:inherit}
+.grid .chip{display:inline-block;font-size:12px;margin:0 0 3px;padding:2px 8px}
+.grid .prep{margin:0 0 4px;padding:3px 6px;font-size:12px}
+.grid .plan-add{border-style:dashed;margin-top:2px}
+
+.gcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px}
+.grow{display:flex;gap:8px}
+#gin{flex:1;min-width:0;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit}
+.gbtn{border:0;background:var(--navy);color:#fff;border-radius:8px;padding:8px 16px;font-size:15px;font-family:inherit}
+.gchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}
+.gat{margin:0 0 12px}
+.gchip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 11px;font-size:13px;color:#374151;font-family:inherit}
+.gchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.gchip.spec.on{background:#D99919;border-color:#D99919}
+.glbl{font-size:12px;color:var(--muted);margin-right:2px}
+.gwhere{background:#FFF7E6;border-color:#F3C77A}
+.gh{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:4px 0 6px}
+.gw{margin:4px 0}
+.gsmall{font-size:12px;color:var(--muted);margin-top:6px}
+.gpad{padding:2px 12px 10px;margin:0}
+.gsec{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:10px 12px 4px;border-top:1px solid var(--line)}
+.glist .gsec:first-child{border-top:0}
+.gsec.spec{color:#8A5A00;background:#FFF7E6}
+.glist{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden}
+.gi{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid #F3F4F6;flex-wrap:wrap}
+.gi.gspec{background:#FFFBF2}
+.gi.gpend{opacity:.55}
+.gck{width:24px;height:24px;border:2px solid #9CA3AF;border-radius:6px;background:#fff;flex:none;padding:0;font-size:14px;line-height:18px;color:#fff}
+.gck.on{background:#9CA3AF}
+.gn{flex:1;min-width:0}
+.gnote{display:block;font-size:12px;color:var(--muted)}
+.ggot .gnote{display:inline}
+.gtag{font-size:11px;background:#FCD9A0;color:#633806;border-radius:999px;padding:2px 8px;white-space:nowrap}
+.ggot .gn{text-decoration:line-through;color:var(--muted)}
+.gedit{width:100%;padding:2px 0 4px 34px}
+.gedit input{width:100%;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px;margin-top:8px;font-family:inherit}
+.gacts{display:flex;gap:12px;margin-top:8px;align-items:center}
+.glink{background:none;border:0;color:var(--blueText);font-size:14px;padding:6px 0;font-family:inherit}
+.gdanger{color:#B91C1C;margin-left:auto}
+
+/* Offline and sync state */
+.wifi[hidden]{display:none}
+.wifi{display:flex;align-items:center;gap:8px;font-size:12px;margin-top:8px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,.14)}
+.wifi.off{background:#7A3B12}
+.wifi.err{background:#7A1E1E}
+.wifi .dot{width:8px;height:8px;border-radius:50%;background:#64D08C;flex:none}
+.wifi.off .dot{background:#F0A33D}
+.wifi.err .dot{background:#F09595}
+.wifi .grow{flex:1}
+.wifi button{background:rgba(255,255,255,.2);border:0;color:#fff;border-radius:6px;padding:4px 10px;font-size:12px;font-family:inherit}
+.setup{max-width:30em;margin:0 auto;padding:4px}
+.setup h2{display:block;margin:0 0 6px}
+.setup p{font-size:14px;color:#374151;line-height:1.5}
+.setup label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+.setup input{width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit}
+.setup .err{color:#A32D2D;font-size:13px;margin-top:10px}
+.setup ol{font-size:13px;color:#374151;line-height:1.6;padding-left:1.2em}
+code{background:#E9EBEF;border-radius:4px;padding:1px 5px;font-size:12px;word-break:break-all}
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1>👨‍👩‍👧‍👦 Family Planner</h1><span><button class="refresh" onclick="load()">Refresh</button> <button class="refresh" onclick="openSetup()" aria-label="Settings">&#9881;</button></span></div>
+  <div class="sub" id="sub">Loading...</div>
+  <div class="tabs">
+    <button class="tab on" id="t0" onclick="showTab(0)">This week</button>
+    <button class="tab" id="t1" onclick="showTab(1)">Next week</button>
+    <button class="tab" id="t2" onclick="showTab(2)">Events</button>
+    <button class="tab" id="t3" onclick="showTab(3)">Groceries</button>
+  </div>
+  <div class="wifi" id="wifi" hidden><span class="dot"></span><span id="wifitext"></span><span class="grow"></span><button id="wifibtn" onclick="flush(true)">Retry</button></div>
+</header>
+<main id="main"><div class="loading">Loading the planner...</div></main>
+<div id="toast"></div>
+<script src="./app.js"></script>
+</body>
+</html>

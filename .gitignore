@@ -1,0 +1,13 @@
+# clasp credentials and the script id: never in a public repo
+.clasp.json
+.clasprc.json
+apps-script/.clasp.json
+
+# macOS
+.DS_Store
+
+# local preview config
+.claude/
+
+# family-specific config: pushed to Apps Script, never to GitHub
+apps-script/Config.js

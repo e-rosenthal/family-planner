@@ -1,0 +1,51 @@
+/**
+ * Family-specific configuration.
+ *
+ * This file is pushed to Apps Script by clasp but is gitignored, so none of
+ * these names reach the public repository. The code in Code.js and Api.js
+ * reads them only from inside functions, so file load order does not matter.
+ *
+ * If this is ever missing locally, `clasp pull` brings it back from the
+ * script project, which is the system of record for it.
+ */
+
+// Shown in the app header and the browser tab.
+const APP_TITLE = 'Family Planner';
+
+// Who can be picked as responsible for something, and who is adding groceries.
+const PEOPLE = ['Ada', 'Grace'];
+
+// The editable columns on the Days tab, in the order the app shows them.
+// Each must match a Days header exactly: these double as the lookup keys.
+const FIELD_ORDER = ['Morning', "Kid's lunch", 'Pickup', 'Dinner', 'Who cooks', 'Bedtime', 'Other meals', 'Notes'];
+
+// Display overrides where the sheet header is not what reads best on a phone.
+const FIELD_LABELS = { "Kid's lunch": 'Lunch (kid)' };
+
+// Only needed Monday to Friday. Blank ones on a school day count as an open slot.
+const WEEKDAY_ONLY = ['Morning', "Kid's lunch", 'Pickup'];
+
+// Needed every day of the week.
+const EVERYDAY_FIELDS = ['Dinner', 'Who cooks', 'Bedtime'];
+
+// Free text rather than a dropdown.
+const TEXT_FIELDS = ['Other meals', 'Notes'];
+
+// Fields that fall back to the Usual Week tab when a day has no value set.
+const TEMPLATE_FIELDS = ['Morning', "Kid's lunch", 'Pickup', 'Dinner', 'Who cooks', 'Bedtime'];
+
+// Fields whose dropdown choices come from the Days tab data validation.
+const LIST_FIELDS = ['Morning', "Kid's lunch", 'Pickup', 'Who cooks', 'Bedtime'];
+
+/** The schema both the PWA and the old page use to render. */
+function appSchema_() {
+  return {
+    title: APP_TITLE,
+    people: PEOPLE,
+    order: FIELD_ORDER,
+    labels: FIELD_LABELS,
+    weekdayOnly: WEEKDAY_ONLY,
+    everyday: EVERYDAY_FIELDS,
+    text: TEXT_FIELDS,
+  };
+}
