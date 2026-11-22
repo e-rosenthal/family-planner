@@ -121,6 +121,59 @@ function enqueue(op) {
   flush();
 }
 
+/** Re-apply edits that have not reached the sheet yet onto fresh server state. */
+function replayQueue() {
+  QUEUE.forEach(function (op) {
+    try {
+      if (DATA && op.kind === 'setField') {
+        var day = findDay(op.date);
+        if (day && day.fields[op.field]) day.fields[op.field].set = op.value;
+      } else if (DATA && op.kind === 'addPlan') {
+        if (!findEvent(op.id)) DATA.events.push(mkEvent(op.id, { start: op.date, title: op.text }));
+      } else if (DATA && op.kind === 'saveEvent') {
+        var cur = findEvent(op.id);
+        if (cur) {
+          var merged = {};
+          Object.keys(EVENT_FIELDS).forEach(function (k) { merged[k] = cur[k]; });
+          Object.keys(op.fields).forEach(function (k) { merged[k] = op.fields[k]; });
+          DATA.events[DATA.events.indexOf(cur)] = mkEvent(op.id, merged);
+        } else if (op.fields.start && op.fields.title) {
+          DATA.events.push(mkEvent(op.id, op.fields));
+        }
+      } else if (DATA && op.kind === 'deleteEvent') {
+        var gone = findEvent(op.id);
+        if (gone) DATA.events.splice(DATA.events.indexOf(gone), 1);
+      } else if (G && op.kind === 'addGrocery') {
+        if (!G.need.some(function (r) { return r.id === op.id; })) {
+          G.need.push({ id: op.id, item: op.item, where: op.where, note: op.note || '',
+            addedBy: op.by, status: 'Need', pending: true });
+        }
+      } else if (G && op.kind === 'setGroceryStatus') {
+        var k = gFind(op.id);
+        if (op.status === 'Got' || op.status === 'Removed') {
+          if (k >= 0) {
+            var row = G.need.splice(k, 1)[0];
+            if (op.status === 'Got') { row.status = 'Got'; row.gotOn = gToday(); row.gotAt = op.store; G.got.unshift(row); }
+          }
+        } else if (op.status === 'Need' && k < 0) {
+          for (var i = 0; i < G.got.length; i++) {
+            if (G.got[i].id === op.id) {
+              var back = G.got.splice(i, 1)[0];
+              back.status = 'Need'; back.gotOn = ''; back.gotAt = '';
+              G.need.push(back);
+              break;
+            }
+          }
+        }
+      } else if (G && op.kind === 'setGroceryDetails') {
+        var j = gFind(op.id);
+        if (j >= 0) { G.need[j].where = op.where; G.need[j].note = op.note; }
+      }
+    } catch (err) { /* a replay that cannot apply is not worth losing the sync over */ }
+  });
+  if (DATA) rebuildDays();
+}
+
 function wants() {
   var w = ['planner'];
   if (G || TAB === 3) w.push('groceries');
@@ -150,8 +203,14 @@ function flush(manual) {
       QUEUE = QUEUE.filter(function (q) { return !handled[q.opId]; });
       saveQueue();
 
-      if (d.planner) { DATA = d.planner; applySchema(DATA.schema); lsPut(CACHE_KEY, DATA); }
-      if (d.groceries) { G = d.groceries; lsPut(GROC_KEY, G); }
+      if (d.planner) { DATA = d.planner; applySchema(DATA.schema); }
+      if (d.groceries) { G = d.groceries; }
+      // The server's answer predates anything queued while it was in flight.
+      // Without this, an edit made mid-refresh vanishes when the response
+      // lands and only comes back after the next round trip.
+      replayQueue();
+      if (d.planner) lsPut(CACHE_KEY, DATA);
+      if (d.groceries) lsPut(GROC_KEY, G);
       SYNCERR = ''; AUTHFAIL = false; SYNCING = false;
       render();
       if (errs.length) toast(errs.length === 1 ? errs[0] : errs.length + ' edits could not be saved');
@@ -308,6 +367,8 @@ function addDays(ds, n) {
 
 function load() { return flush(true); }
 
+var EVENT_FIELDS = { start: 1, end: 1, title: 1, category: 1, lead: 1, prep: 1, prepBy: 1, notes: 1 };
+
 /** Build the client-side twin of a server event row. */
 function mkEvent(id, f) {
   var end = f.end && f.end !== f.start ? f.end : '';
@@ -395,13 +456,33 @@ function control(day, f) {
   h += '<option value="__other">Other...</option></select>';
   return h;
 }
+/** The events covering a day, so a plan chip can link back to its event. */
+function dayEvents(day) {
+  return DATA.events.filter(function (e) { return e.start <= day.date && e.lastDay >= day.date; });
+}
+function planChips(day) {
+  var evs = dayEvents(day);
+  if (evs.length) {
+    return evs.map(function (e) {
+      return '<span class="chip tap" onclick="openEvent(' + q(e.id) + ')">' + esc(e.title) + '</span>';
+    }).join(' ');
+  }
+  return day.plans.map(function (p) { return '<span class="chip">' + esc(p) + '</span>'; }).join(' ');
+}
+/** Jump to the Events tab with this event open for editing. */
+function openEvent(id) {
+  showTab(2);
+  EDIT = id;
+  render();
+}
+
 function dayCard(day) {
   var isToday = day.date === DATA.today;
   var past = day.date < DATA.today;
   var h = '<div class="card' + (isToday ? ' today' : '') + (past ? ' past' : '') + '">';
   h += '<div class="dh"><b>' + esc(day.label) + '</b>' + (isToday ? '<span class="badge">Today</span>' : '') + '</div>';
   if (day.plans.length) {
-    h += '<div class="plans">' + day.plans.map(function (p) { return '<span class="chip">' + esc(p) + '</span>'; }).join('') + '</div>';
+    h += '<div class="plans">' + planChips(day) + '</div>';
   }
   day.prep.forEach(function (p) { h += '<div class="prep">Prep: ' + esc(p) + '</div>'; });
   h += '<div class="rows">';
@@ -428,7 +509,7 @@ function tableView(days) {
   h += '<tr><td class="rl">Plans</td>';
   days.forEach(function (d) {
     var c = d.date === DATA.today ? 'today' : (d.date < DATA.today ? 'past' : '');
-    var cell = d.plans.map(function (p) { return '<span class="chip">' + esc(p) + '</span>'; }).join(' ');
+    var cell = planChips(d);
     d.prep.forEach(function (p) { cell += '<div class="prep">Prep: ' + esc(p) + '</div>'; });
     if (d.editable) cell += '<input class="plan-add" placeholder="+ plan" data-date="' + d.date + '" onkeydown="planKey(event, this)" onblur="planSave(this)">';
     h += '<td class="' + c + '">' + cell + '</td>';

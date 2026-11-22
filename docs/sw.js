@@ -7,7 +7,7 @@
  *
  * Bump CACHE when the shell changes so old copies are cleared on activate.
  */
-var CACHE = 'rfa-shell-v2';
+var CACHE = 'rfa-shell-v3';
 var SHELL = [
   './',
   './index.html',
