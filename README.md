@@ -40,6 +40,29 @@ it already created instead of adding a duplicate.
 Edits are also folded together while queued: setting the same cell twice
 offline reaches the sheet once, with the later value.
 
+### Refreshing without interrupting an edit
+
+Fresh data arrives every 30 seconds while the app is open, on every edit, on
+regaining signal, and on Refresh. Repainting the screen for it used to throw
+away whatever was being typed, because the view is rebuilt from scratch.
+
+Syncing never pauses - the queue drains and the new state is stored either way.
+Only the repaint waits:
+
+- Keystrokes land in `DIRTY`, keyed per control, and a repaint reads those
+  instead of the stored value. Anything typed and not yet saved survives being
+  rebuilt. The buffer is cleared when the edit is saved or cancelled, and is
+  deliberately never persisted.
+- The focused control and the caret position are restored across a repaint, so
+  a rebuild does not move the cursor or close the keyboard.
+- While a control is actually in use, a repaint caused by incoming data is
+  postponed (`renderSync`) and runs about 300ms after the edit finishes. A
+  dropdown or date field gets a long grace period, because the native picker
+  cannot survive its element being replaced and cannot be reopened from code.
+  Both grace periods expire, so a field left focused and forgotten cannot stop
+  updates from ever showing.
+- A new build waits for the same quiet moment before reloading the page.
+
 ### CORS
 
 Apps Script web apps cannot answer a CORS preflight, so requests must stay

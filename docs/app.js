@@ -10,7 +10,7 @@
 
 // Bump with every release, together with CACHE in sw.js. Shown on the
 // Settings screen so it is possible to tell which build a phone is running.
-var APP_VERSION = 'v4';
+var APP_VERSION = 'v5';
 
 var CFG_KEY = 'rfa-cfg';
 var QUEUE_KEY = 'rfa-queue';
@@ -216,7 +216,7 @@ function flush(manual) {
       if (d.planner) lsPut(CACHE_KEY, DATA);
       if (d.groceries) lsPut(GROC_KEY, G);
       SYNCERR = ''; AUTHFAIL = false; SYNCING = false;
-      render();
+      renderSync();
       if (errs.length) toast(errs.length === 1 ? errs[0] : errs.length + ' edits could not be saved');
       if (QUEUE.length) return flush();   // more than one batch was waiting
     })
@@ -340,6 +340,24 @@ var EDIT = null;        // event id being edited, or 'new'
 var SHOWALL = false;
 var VIEW = 'table';
 var AUTO_SCROLL = true;
+
+// Keystrokes that have not been committed yet, keyed per control. A repaint
+// reads these instead of the stored value, so data arriving from the sheet
+// while a field is half typed cannot swallow what is in it. Cleared when the
+// edit is saved or cancelled; never persisted, since an uncommitted edit
+// should not outlive the page.
+var DIRTY = {};
+var PENDING_RENDER = false;   // a repaint that incoming data asked for and the edit in progress postponed
+var LAST_TOUCH = 0;           // when the user last touched a control
+var SETTLE = null;
+
+function dirty(k, fallback) {
+  return Object.prototype.hasOwnProperty.call(DIRTY, k) ? DIRTY[k] : fallback;
+}
+function dirtyDrop(prefix) {
+  Object.keys(DIRTY).forEach(function (k) { if (k.indexOf(prefix) === 0) delete DIRTY[k]; });
+}
+function anyDirty() { return Object.keys(DIRTY).length > 0; }
 // The field schema is family-specific, so it comes from the server with the
 // data rather than being baked into this public file.
 var ORDER = [], LABELS = {}, SCHOOL = [], EVERYDAY = [], TEXT = [];
@@ -448,12 +466,13 @@ function control(day, f) {
   var id = day.date + '|' + f;
   var dis = day.editable ? '' : ' disabled';
   if (TEXT.indexOf(f) >= 0) {
-    return '<input data-id="' + esc(id) + '" value="' + esc(fv.set) + '" placeholder="Add"' + dis + ' onchange="saveText(this)">';
+    return '<input data-id="' + esc(id) + '" data-k="f|' + esc(id) + '" value="' +
+      esc(dirty('f|' + id, fv.set)) + '" placeholder="Add"' + dis + ' onchange="saveText(this)">';
   }
   var opts = (DATA.options[f] || []).slice();
   if (fv.set !== '' && opts.indexOf(fv.set) < 0) opts.unshift(fv.set);
   var first = fv.usual !== '' ? 'Usual: ' + fv.usual : 'Not set';
-  var h = '<select data-id="' + esc(id) + '" class="' + cls(day, f, fv) + '"' + dis + ' onchange="saveSel(this)">';
+  var h = '<select data-id="' + esc(id) + '" data-k="f|' + esc(id) + '" class="' + cls(day, f, fv) + '"' + dis + ' onchange="saveSel(this)">';
   h += '<option value=""' + (fv.set === '' ? ' selected' : '') + '>' + esc(first) + '</option>';
   opts.forEach(function (o) {
     h += '<option value="' + esc(o) + '"' + (o === fv.set ? ' selected' : '') + '>' + esc(o) + '</option>';
@@ -477,6 +496,7 @@ function planChips(day) {
 /** Jump to the Events tab with this event open for editing. */
 function openEvent(id) {
   showTab(2);
+  dirtyDrop('ed|');
   EDIT = id;
   render();
 }
@@ -496,7 +516,9 @@ function dayCard(day) {
   });
   h += '</div>';
   if (day.editable) {
-    h += '<div class="add"><input placeholder="+ Add a plan for this day" data-date="' + day.date + '" onkeydown="planKey(event, this)" onblur="planSave(this)"></div>';
+    h += '<div class="add"><input placeholder="+ Add a plan for this day" data-date="' + day.date +
+      '" data-k="p|' + day.date + '" value="' + esc(dirty('p|' + day.date, '')) +
+      '" onkeydown="planKey(event, this)" onblur="planSave(this)"></div>';
   } else {
     h += '<div class="note">This day is before the planner starts, so it is view only.</div>';
   }
@@ -516,7 +538,9 @@ function tableView(days) {
     var c = d.date === DATA.today ? 'today' : (d.date < DATA.today ? 'past' : '');
     var cell = planChips(d);
     d.prep.forEach(function (p) { cell += '<div class="prep">Prep: ' + esc(p) + '</div>'; });
-    if (d.editable) cell += '<input class="plan-add" placeholder="+ plan" data-date="' + d.date + '" onkeydown="planKey(event, this)" onblur="planSave(this)">';
+    if (d.editable) cell += '<input class="plan-add" placeholder="+ plan" data-date="' + d.date +
+      '" data-k="p|' + d.date + '" value="' + esc(dirty('p|' + d.date, '')) +
+      '" onkeydown="planKey(event, this)" onblur="planSave(this)">';
     h += '<td class="' + c + '">' + cell + '</td>';
   });
   h += '</tr>';
@@ -566,15 +590,19 @@ function opts(list, cur) {
 }
 function editor(e) {
   e = e || { id: null, title: '', start: DATA.today, end: '', category: '', lead: '', prep: '', prepBy: '', notes: '' };
+  // Keyed on the event so half-finished text cannot leak into another one.
+  var kp = 'ed|' + (e.id || 'new') + '|';
+  function dv(f, v) { return esc(dirty(kp + f, v)); }
+  function dk(f) { return ' data-k="' + esc(kp + f) + '"'; }
   var h = '<div class="editor" id="ed">';
-  h += '<div class="f"><span>What</span><input id="e_title" value="' + esc(e.title) + '" placeholder="e.g. Hosting the Cohens"></div>';
-  h += '<div class="two"><div class="f"><span>Starts</span><input type="date" id="e_start" value="' + esc(e.start) + '"></div>';
-  h += '<div class="f"><span>Ends (optional)</span><input type="date" id="e_end" value="' + esc(e.end) + '"></div></div>';
-  h += '<div class="two"><div class="f"><span>Category</span><select id="e_cat">' + opts(DATA.options.Category, e.category) + '</select></div>';
-  h += '<div class="f"><span>Lead</span><select id="e_lead">' + opts(DATA.options.Lead, e.lead) + '</select></div></div>';
-  h += '<div class="f"><span>Prep needed</span><input id="e_prep" value="' + esc(e.prep) + '" placeholder="e.g. Menu, invite guests"></div>';
-  h += '<div class="f"><span>Prep by</span><input type="date" id="e_prepby" value="' + esc(e.prepBy) + '"></div>';
-  h += '<div class="f"><span>Notes</span><input id="e_notes" value="' + esc(e.notes) + '"></div>';
+  h += '<div class="f"><span>What</span><input id="e_title"' + dk('title') + ' value="' + dv('title', e.title) + '" placeholder="e.g. Hosting the Cohens"></div>';
+  h += '<div class="two"><div class="f"><span>Starts</span><input type="date" id="e_start"' + dk('start') + ' value="' + dv('start', e.start) + '"></div>';
+  h += '<div class="f"><span>Ends (optional)</span><input type="date" id="e_end"' + dk('end') + ' value="' + dv('end', e.end) + '"></div></div>';
+  h += '<div class="two"><div class="f"><span>Category</span><select id="e_cat"' + dk('category') + '>' + opts(DATA.options.Category, dirty(kp + 'category', e.category)) + '</select></div>';
+  h += '<div class="f"><span>Lead</span><select id="e_lead"' + dk('lead') + '>' + opts(DATA.options.Lead, dirty(kp + 'lead', e.lead)) + '</select></div></div>';
+  h += '<div class="f"><span>Prep needed</span><input id="e_prep"' + dk('prep') + ' value="' + dv('prep', e.prep) + '" placeholder="e.g. Menu, invite guests"></div>';
+  h += '<div class="f"><span>Prep by</span><input type="date" id="e_prepby"' + dk('prepBy') + ' value="' + dv('prepBy', e.prepBy) + '"></div>';
+  h += '<div class="f"><span>Notes</span><input id="e_notes"' + dk('notes') + ' value="' + dv('notes', e.notes) + '"></div>';
   h += '<div class="actions"><button class="btn" onclick="saveEv()">Save</button><button class="btn ghost" onclick="cancelEv()">Cancel</button><span class="grow"></span>';
   if (e.id) h += '<button class="btn danger" onclick="delEv()">Delete</button>';
   return h + '</div></div>';
@@ -615,9 +643,9 @@ function eventsView() {
   h += '<div class="note" style="padding:10px 4px">Yellow = in the next 2 weeks. Tap any event to edit it.</div>';
   return h;
 }
-function editEv(id) { EDIT = (EDIT === id ? null : id); render(); }
-function newEv() { EDIT = 'new'; render(); }
-function cancelEv() { EDIT = null; render(); }
+function editEv(id) { dirtyDrop('ed|'); EDIT = (EDIT === id ? null : id); render(); }
+function newEv() { dirtyDrop('ed|'); EDIT = 'new'; render(); }
+function cancelEv() { dirtyDrop('ed|'); EDIT = null; render(); }
 function val(id) { return document.getElementById(id).value.trim(); }
 
 function saveEv() {
@@ -634,14 +662,14 @@ function saveEv() {
     DATA.events.push(mkEvent(id, f));
   } else {
     var cur = findEvent(EDIT);
-    if (!cur) { EDIT = null; render(); return; }
+    if (!cur) { dirtyDrop('ed|'); EDIT = null; render(); return; }
     // Send only what actually changed, so the other phone's edit to a
     // different field of the same event survives.
     var patch = {};
     Object.keys(f).forEach(function (k) {
       if (String(cur[k] == null ? '' : cur[k]) !== f[k]) patch[k] = f[k];
     });
-    if (!Object.keys(patch).length) { EDIT = null; render(); return; }
+    if (!Object.keys(patch).length) { dirtyDrop('ed|'); EDIT = null; render(); return; }
     enqueue({ kind: 'saveEvent', id: EDIT, fields: patch });
     var merged = mkEvent(EDIT, {
       start: f.start, end: f.end, title: f.title, category: f.category,
@@ -650,6 +678,7 @@ function saveEv() {
     DATA.events[DATA.events.indexOf(cur)] = merged;
   }
   rebuildDays();
+  dirtyDrop('ed|');
   EDIT = null;
   toast(navigator.onLine ? 'Saved' : 'Saved on this phone');
   render();
@@ -657,11 +686,12 @@ function saveEv() {
 
 function delEv() {
   var e = findEvent(EDIT);
-  if (!e) { EDIT = null; render(); return; }
+  if (!e) { dirtyDrop('ed|'); EDIT = null; render(); return; }
   if (!window.confirm('Delete "' + e.title + '"?')) return;
   enqueue({ kind: 'deleteEvent', id: e.id });
   DATA.events.splice(DATA.events.indexOf(e), 1);
   rebuildDays();
+  dirtyDrop('ed|');
   EDIT = null;
   toast('Deleted');
   render();
@@ -672,12 +702,79 @@ function delEv() {
 // ---------------------------------------------------------------------------
 
 function showTab(t) {
+  dirtyDrop('ed|');
   TAB = t; EDIT = null; AUTO_SCROLL = true;
   try { localStorage.setItem('rfa-tab', String(t)); } catch (e) {}
   for (var i = 0; i < 4; i++) document.getElementById('t' + i).className = 'tab' + (i === t ? ' on' : '');
   render();
   if (t === 3) flush();
   window.scrollTo(0, 0);
+}
+
+/**
+ * Whether the user is in the middle of using a control right now.
+ *
+ * A select or a date field may have the native picker open, and a picker
+ * cannot survive its element being replaced or be reopened from code, so those
+ * get a long grace period. Typing in a text field is recoverable - the text is
+ * in DIRTY and the caret is restored - so it gets a shorter one. Both expire,
+ * because a field left focused and forgotten must not stop the sheet's updates
+ * from ever showing.
+ */
+function interacting() {
+  var a = document.activeElement;
+  var main = document.getElementById('main');
+  if (!a || !main || !main.contains(a)) return false;
+  if (!/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return false;
+  var picker = a.tagName === 'SELECT' || a.type === 'date';
+  return Date.now() - LAST_TOUCH < (picker ? 90000 : 45000);
+}
+
+/**
+ * A repaint that incoming data asked for, rather than something the user just
+ * did. Syncing itself never pauses - the queue still drains and DATA is still
+ * replaced - only the repaint waits, so an edit in progress is left alone and
+ * the new state appears the moment the user is done with it.
+ */
+function renderSync() {
+  if (interacting()) { PENDING_RENDER = true; paintWifi(); return; }
+  PENDING_RENDER = false;
+  render();
+}
+
+/** Once the user stops touching a control, run whatever repaint was waiting. */
+function settle() {
+  if (SETTLE) clearTimeout(SETTLE);
+  SETTLE = setTimeout(function () {
+    SETTLE = null;
+    if (!PENDING_RENDER) return;
+    if (interacting()) return;      // they moved to another field; wait again
+    PENDING_RENDER = false;
+    render();
+  }, 300);
+}
+
+/** Remember the focused control and caret so a repaint can put them back. */
+function focusSnap() {
+  var a = document.activeElement;
+  if (!a || !a.getAttribute) return null;
+  var k = a.getAttribute('data-k');
+  if (!k) return null;
+  var snap = { k: k, s: null, e: null };
+  try { snap.s = a.selectionStart; snap.e = a.selectionEnd; } catch (err) {}
+  return snap;
+}
+function focusRestore(snap) {
+  if (!snap) return;
+  var list = document.querySelectorAll('[data-k]');
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].getAttribute('data-k') !== snap.k) continue;
+    try { list[i].focus({ preventScroll: true }); } catch (err) {
+      try { list[i].focus(); } catch (e2) { return; }
+    }
+    if (snap.s !== null) { try { list[i].setSelectionRange(snap.s, snap.e); } catch (err2) {} }
+    return;
+  }
 }
 
 function render() {
@@ -708,8 +805,10 @@ function render() {
   var wrap = document.querySelector('.tablewrap');
   var sx = wrap ? wrap.scrollLeft : 0;
   var sy = window.scrollY || 0;
+  var snap = focusSnap();
   main.className = (TAB !== 2 && VIEW === 'table') ? 'wide' : '';
   main.innerHTML = h + '<div style="height:40px"></div>';
+  focusRestore(snap);
   var wrap2 = document.querySelector('.tablewrap');
   if (wrap2) {
     var todayTh = AUTO_SCROLL ? wrap2.querySelector('th.today') : null;
@@ -726,37 +825,45 @@ function render() {
 
 function findDay(date) { return DATA.days.filter(function (d) { return d.date === date; })[0]; }
 
-function save(id, value) {
+function save(id, value, soon) {
   var parts = id.split('|');
   var day = findDay(parts[0]);
   var f = parts.slice(1).join('|');
+  delete DIRTY['f|' + id];
   day.fields[f].set = value;
   lsPut(CACHE_KEY, DATA);
   enqueue({ kind: 'setField', date: parts[0], field: f, value: value });
-  render();
+  // Committed on blur: the next control may already be opening, so hold the
+  // repaint until the focus has settled rather than tearing it out.
+  if (soon) renderSync(); else render();
   toast(value === '' ? 'Back to usual' : (navigator.onLine ? 'Saved' : 'Saved on this phone'));
 }
 function saveSel(el) {
   var v = el.value;
+  var id = el.getAttribute('data-id');
+  // The picker is closed and the choice is made, so drop the focus: a control
+  // left focused would keep postponing repaints for no reason.
+  try { el.blur(); } catch (e) {}
   if (v === '__other') {
     v = window.prompt('Enter a name or meal');
-    if (v === null) { render(); return; }
+    if (v === null) { delete DIRTY['f|' + id]; render(); return; }
     v = v.trim();
   }
-  save(el.getAttribute('data-id'), v);
+  save(id, v);
 }
-function saveText(el) { save(el.getAttribute('data-id'), el.value.trim()); }
+function saveText(el) { save(el.getAttribute('data-id'), el.value.trim(), true); }
 function planKey(ev, el) { if (ev.key === 'Enter') { el.blur(); } }
 function planSave(el) {
+  var date = el.getAttribute('data-date');
   var text = el.value.trim();
+  delete DIRTY['p|' + date];
   if (!text) return;
   el.value = '';
-  var date = el.getAttribute('data-date');
   var id = 'e' + uid();
   enqueue({ kind: 'addPlan', id: id, date: date, text: text });
   DATA.events.push(mkEvent(id, { start: date, title: text }));
   rebuildDays();
-  render();
+  renderSync();
   toast(navigator.onLine ? 'Plan added' : 'Plan saved on this phone');
 }
 
@@ -854,7 +961,12 @@ function gReadd(i) {
   } else gAdd(r.item);
 }
 function gAt(i) { GSTORE = i < 0 ? '' : G.stores[i]; renderGroceries(); window.scrollTo(0, 0); }
-function gEdit(id) { var k = gFind(id); if (k < 0) return; GEDIT = GEDIT === id ? null : id; GESEL = gStores(G.need[k].where); renderGroceries(); }
+function gEdit(id) {
+  var k = gFind(id); if (k < 0) return;
+  dirtyDrop('gn|');
+  GEDIT = GEDIT === id ? null : id; GESEL = gStores(G.need[k].where);
+  renderGroceries();
+}
 function gEToggle(i) {
   if (i < 0) GESEL = [];
   else { var s = G.stores[i], k = GESEL.indexOf(s); if (k >= 0) GESEL.splice(k, 1); else GESEL.push(s); }
@@ -863,6 +975,7 @@ function gEToggle(i) {
 function gEditSave() {
   var id = GEDIT, k = gFind(id); if (k < 0) return;
   var note = (document.getElementById('gnote') || {}).value || '', where = gWhere(GESEL), item = G.need[k].item;
+  dirtyDrop('gn|');
   GEDIT = null;
   gSave({ kind: 'setGroceryDetails', id: id, where: where, note: note }, function () {
     G.need.forEach(function (r) { if (r.item === item) r.where = where; });
@@ -872,6 +985,7 @@ function gEditSave() {
 }
 function gRemove() {
   var id = GEDIT, k = gFind(id); if (k < 0) return;
+  dirtyDrop('gn|');
   GEDIT = null;
   gSave({ kind: 'setGroceryStatus', id: id, status: 'Removed', store: '' }, function () { G.need.splice(k, 1); });
 }
@@ -884,7 +998,8 @@ function gRow(r) {
     (s.length ? '<span class="gtag">' + esc(s.join(' / ')) + '</span>' : '');
   if (GEDIT === r.id) {
     h += '<div class="gedit"><div class="gchips" id="gechips">' + gChips(GESEL, 'gEToggle') + '</div>' +
-      '<input id="gnote" placeholder="Note (brand, size, how many)" value="' + esc(r.note) + '">' +
+      '<input id="gnote" data-k="gn|' + esc(r.id) + '" placeholder="Note (brand, size, how many)" value="' +
+        esc(dirty('gn|' + r.id, r.note)) + '">' +
       '<div class="gacts"><button class="gbtn" onclick="gEditSave()">Save</button>' +
       '<button class="glink" onclick="gEdit(' + q(r.id) + ')">Cancel</button>' +
       '<button class="glink gdanger" onclick="gRemove()">Remove</button></div></div>';
@@ -910,7 +1025,7 @@ function renderGroceries() {
         : 'Loading groceries...') + '</div>';
     return;
   }
-  var focused = document.activeElement && document.activeElement.id === 'gin';
+  var snap = focusSnap();
   var need = G.need, any = [], spec = [], rules = {}, order = [];
   need.forEach(function (r) {
     var s = gStores(r.where);
@@ -921,7 +1036,7 @@ function renderGroceries() {
     rules[k].push(r);
   });
   document.getElementById('sub').textContent = need.length + ' to get' + (GSTORE ? '  |  Shopping at ' + GSTORE : '');
-  var h = '<div class="gcard"><div class="grow"><input id="gin" list="gcat" placeholder="Add an item" autocomplete="off" enterkeyhint="done" oninput="gTyped(this.value)" onkeydown="gKey(event)" value="' + esc(GDRAFT) + '">' +
+  var h = '<div class="gcard"><div class="grow"><input id="gin" data-k="gin" list="gcat" placeholder="Add an item" autocomplete="off" enterkeyhint="done" oninput="gTyped(this.value)" onkeydown="gKey(event)" value="' + esc(GDRAFT) + '">' +
     '<button class="gbtn" onclick="gAdd()">Add</button></div>' +
     '<div class="gchips" id="gchips">' + gChips(GSEL, 'gToggle') + '</div>' +
     '<datalist id="gcat">' + G.catalog.map(function (c) { return '<option value="' + esc(c.item) + '">'; }).join('') + '</datalist></div>';
@@ -963,7 +1078,7 @@ function renderGroceries() {
   h += '<div class="gchips" style="margin-top:14px"><span class="glbl">Adding as</span>' + ((G.people || []).map(function (n) { return '<button class="gchip' + (by === n ? ' on' : '') + '" onclick="gSetBy(' + q(n) + ')">' + esc(n) + '</button>'; })).join('') + '</div>';
   h += '<div style="margin-top:18px;text-align:center"><button class="glink" onclick="openSetup()">Settings</button></div>';
   main.innerHTML = h + '<div style="height:40px"></div>';
-  if (focused) { var inp = document.getElementById('gin'); if (inp) { inp.focus(); var n = inp.value.length; inp.setSelectionRange(n, n); } }
+  focusRestore(snap);
 }
 
 // ---------------------------------------------------------------------------
@@ -983,13 +1098,28 @@ function renderGroceries() {
   render();
   if (CFG) flush();
 
+  // One delegated listener is enough to know what is being typed and when, so
+  // no control needs its own handler for it.
+  var mainEl = document.getElementById('main');
+  mainEl.addEventListener('focusin', function () { LAST_TOUCH = Date.now(); }, true);
+  mainEl.addEventListener('input', function (ev) {
+    LAST_TOUCH = Date.now();
+    var t = ev.target;
+    var k = t && t.getAttribute ? t.getAttribute('data-k') : null;
+    if (k && k !== 'gin') DIRTY[k] = t.value;   // the add-an-item box keeps its own draft
+  }, true);
+  mainEl.addEventListener('change', function () { LAST_TOUCH = Date.now(); settle(); }, true);
+  mainEl.addEventListener('focusout', function () { settle(); }, true);
+
   window.addEventListener('online', function () { paintWifi(); flush(); });
   window.addEventListener('offline', paintWifi);
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') flush();
   });
+  // Polling no longer has to stand down for an open editor: the sync runs, and
+  // only the repaint waits for the edit to finish.
   setInterval(function () {
-    if (document.visibilityState === 'visible' && !GEDIT && EDIT === null) flush();
+    if (document.visibilityState === 'visible') flush();
   }, 30000);
 
   if ('serviceWorker' in navigator) {
@@ -998,7 +1128,14 @@ function renderGroceries() {
     var hadController = !!navigator.serviceWorker.controller;
     var reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (hadController && !reloading) { reloading = true; location.reload(); }
+      if (!hadController || reloading) return;
+      reloading = true;
+      // A reload throws away anything typed but not yet saved, so wait for the
+      // edit in progress to finish before taking the new build.
+      (function waitForIdle() {
+        if (interacting() || anyDirty()) { setTimeout(waitForIdle, 1000); return; }
+        location.reload();
+      })();
     });
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').then(function (reg) {
